@@ -551,12 +551,12 @@
                 <div class="deck-controls deck-a">
                     <!-- Outer Edge: Pitch -->
                     <div class="pitch-section">
-                        <button class="sync-btn">SYNC</button>
+                        <button class="sync-btn" id="syncA">SYNC</button>
                         <div class="pitch-slider-container">
                             <input type="range" id="pitchA" class="vertical-slider" min="-8" max="8" value="0" step="0.05">
                         </div>
                     </div>
-                    
+
                     <!-- Center Edge: Transport & Pads -->
                     <div class="deck-center-area">
                         <!-- Neural Mix / FX placeholder row -->
@@ -592,6 +592,10 @@
                             <span class="knob-label">LOW</span>
                             <input type="range" id="eqA_low" class="vertical-slider" style="height:40px;" min="-24" max="6" value="0" step="0.5">
                         </div>
+                        <div class="knob-container">
+                            <span class="knob-label">FILTER</span>
+                            <input type="range" id="filterA" class="vertical-slider" style="height:40px;" min="0" max="1" value="0.5" step="0.01">
+                        </div>
                         <div class="vu-meter"><div class="vu-bar" id="vuA"></div></div>
                     </div>
                 </div>
@@ -605,6 +609,18 @@
                         <div class="playhead-line"></div>
                     </div>
                     
+                    <!-- Master / Headphone gain -->
+                    <div class="mixer-faders" style="margin-bottom:6px;">
+                        <div class="vol-fader-wrap">
+                            <span style="font-size:10px; color:#888; margin-bottom:5px;">MASTER</span>
+                            <input type="range" id="masterGain" class="vertical-slider" style="height:40px;" min="0" max="1" value="0.8" step="0.01">
+                        </div>
+                        <div class="vol-fader-wrap">
+                            <span style="font-size:10px; color:#888; margin-bottom:5px;">PHONES</span>
+                            <input type="range" id="headphoneGain" class="vertical-slider" style="height:40px;" min="0" max="1" value="0.8" step="0.01">
+                        </div>
+                    </div>
+
                     <!-- Faders -->
                     <div class="mixer-faders">
                         <div class="vol-fader-wrap">
@@ -639,6 +655,10 @@
                             <span class="knob-label">LOW</span>
                             <input type="range" id="eqB_low" class="vertical-slider" style="height:40px;" min="-24" max="6" value="0" step="0.5">
                         </div>
+                        <div class="knob-container">
+                            <span class="knob-label">FILTER</span>
+                            <input type="range" id="filterB" class="vertical-slider" style="height:40px;" min="0" max="1" value="0.5" step="0.01">
+                        </div>
                         <div class="vu-meter"><div class="vu-bar" id="vuB"></div></div>
                     </div>
 
@@ -662,7 +682,7 @@
 
                     <!-- Outer Edge: Pitch -->
                     <div class="pitch-section">
-                        <button class="sync-btn">SYNC</button>
+                        <button class="sync-btn" id="syncB">SYNC</button>
                         <div class="pitch-slider-container">
                             <input type="range" id="pitchB" class="vertical-slider" min="-8" max="8" value="0" step="0.05">
                         </div>

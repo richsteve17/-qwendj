@@ -253,6 +253,56 @@ addTest('F2.5: Custom Mapping UI - Custom mapping modal opens and registers inpu
     }
 });
 
+addTest('F2.6: Filter Knob - Filter CC sweeps the deck lowpass filter', async () => {
+    const input = mockMidiInputs.get('ctrl1');
+    // Filter A is CC 1 on channel 2. Value 0 = full lowpass.
+    input.onmidimessage({ data: [0xB1, 1, 0] });
+    await sleep(100);
+    const lpFreq = window.app.filterLP_A.frequency.value;
+    if (lpFreq > 200) {
+        throw new Error('Lowpass filter did not engage, cutoff: ' + lpFreq);
+    }
+    // Back to center: filter open
+    input.onmidimessage({ data: [0xB1, 1, 64] });
+    await sleep(100);
+    if (window.app.filterLP_A.frequency.value < 19000) {
+        throw new Error('Filter did not return to open at center');
+    }
+});
+
+addTest('F2.7: Sync Button - Sync matches deck BPM to the other deck', async () => {
+    window.app.deckA = { bpm: 120, key: '8A', title: 't', artist: 'a' };
+    window.app.deckB = { bpm: 126, key: '8A', title: 't', artist: 'a' };
+    window.app.playerB.playbackRate = 1;
+    const input = mockMidiInputs.get('ctrl1');
+    // Sync A is note 5 on channel 2
+    input.onmidimessage({ data: [0x91, 5, 127] });
+    await sleep(100);
+    const rate = window.app.playerA.playbackRate;
+    if (Math.abs(rate - 1.05) > 0.005) {
+        throw new Error('Sync did not match BPM, playbackRate: ' + rate);
+    }
+});
+
+addTest('F2.8: Jog Wheel - Relative ticks scrub a paused deck', async () => {
+    if (window.app.playerA.state === 'started') window.app.togglePlay('A');
+    window.app.positionA = 0.1;
+    const input = mockMidiInputs.get('ctrl1');
+    // Jog A is CC 10 on channel 2; value 2 = +2 ticks forward
+    input.onmidimessage({ data: [0xB1, 10, 2] });
+    await sleep(100);
+    if (window.app.positionA <= 0.1) {
+        throw new Error('Jog forward did not advance position: ' + window.app.positionA);
+    }
+    // Value 126 = -2 ticks backward, twice — should rewind below the start point
+    input.onmidimessage({ data: [0xB1, 10, 126] });
+    input.onmidimessage({ data: [0xB1, 10, 126] });
+    await sleep(100);
+    if (window.app.positionA >= 0.1) {
+        throw new Error('Jog backward did not rewind position: ' + window.app.positionA);
+    }
+});
+
 addTest('F3.1: Start/Stop Recording - Clicking record toggles Tone.js recorder', async () => {
     const recordBtn = document.getElementById('recordBtn');
     recordBtn.click();
@@ -462,9 +512,11 @@ addTest('F2.B4: Custom Mapping Collision - Highlight warning when mapping same C
     const ccInputs = modal.querySelectorAll('.cc-input');
     
     // Put same CC on two controls sharing a channel (volumeA and eqA_low, both ch 2)
-    ccInputs[0].value = 14;
-    ccInputs[3].value = 14;
-    ccInputs[0].dispatchEvent(new Event('input'));
+    const volInput = modal.querySelector('.cc-input[data-control="volumeA"]');
+    const eqInput = modal.querySelector('.cc-input[data-control="eqA_low"]');
+    volInput.value = 14;
+    eqInput.value = 14;
+    volInput.dispatchEvent(new Event('input'));
     await sleep(50);
     
     const warning = document.getElementById('midiModalWarning');

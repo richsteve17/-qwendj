@@ -23,23 +23,36 @@ class MidiMapper {
         // hardware and encoded in the note range (hotcue 0-3, sampler 16-19,
         // FX 32-35, loop 48-51).
         const defaultMappings = {
-            "version": 2,
+            "version": 3,
             "cc_mappings": {
                 "volumeA": { "cc": 0, "channel": 2 },
                 "volumeB": { "cc": 0, "channel": 3 },
                 "crossfader": { "cc": 0, "channel": 1 },
+                "masterGain": { "cc": 3, "channel": 1 },
+                "headphoneGain": { "cc": 4, "channel": 1 },
                 "eqA_low": { "cc": 2, "channel": 2 },
                 "eqB_low": { "cc": 2, "channel": 3 },
+                "filterA": { "cc": 1, "channel": 2 },
+                "filterB": { "cc": 1, "channel": 3 },
                 "pitchA": { "cc": 8, "channel": 2 },
-                "pitchB": { "cc": 8, "channel": 3 }
+                "pitchB": { "cc": 8, "channel": 3 },
+                "jogA": { "cc": 10, "channel": 2 },
+                "jogB": { "cc": 10, "channel": 3 }
             },
             "note_mappings": {
                 "playA": { "note": 7, "channel": 2 },
                 "cueA": { "note": 6, "channel": 2 },
+                "syncA": { "note": 5, "channel": 2 },
                 "headphoneCueA": { "note": 12, "channel": 2 },
                 "playB": { "note": 7, "channel": 3 },
                 "cueB": { "note": 6, "channel": 3 },
+                "syncB": { "note": 5, "channel": 3 },
                 "headphoneCueB": { "note": 12, "channel": 3 },
+
+                "stutterA": { "note": 7, "channel": 5 },
+                "returnStartA": { "note": 6, "channel": 5 },
+                "stutterB": { "note": 7, "channel": 6 },
+                "returnStartB": { "note": 6, "channel": 6 },
 
                 "padA1": { "note": 0, "channel": 7 },
                 "padA2": { "note": 1, "channel": 7 },
@@ -97,7 +110,7 @@ class MidiMapper {
 
     saveMappings() {
         localStorage.setItem('midi_mappings', JSON.stringify({
-            version: 2,
+            version: 3,
             cc_mappings: this.ccMappings,
             note_mappings: this.noteMappings
         }));
@@ -182,6 +195,12 @@ class MidiMapper {
     applyCCValue(control, value) {
         if (value < 0 || value > 127) return;
 
+        // Jog wheels send relative ticks, not absolute positions
+        if (control === 'jogA' || control === 'jogB') {
+            this.app.handleJog(control === 'jogA' ? 'A' : 'B', value);
+            return;
+        }
+
         const slider = document.getElementById(control);
         if (slider) {
             slider.value = this.scaleCCValue(control, value);
@@ -193,7 +212,7 @@ class MidiMapper {
         if (control.includes('eq')) {
             if (value === 0) return -24; // Handled by EventListener for Full Kill
             return (value / 127) * 30 - 24;
-        } else if (control.includes('volume')) {
+        } else if (control.includes('volume') || control.includes('Gain') || control.includes('filter')) {
             return value / 127;
         } else if (control === 'crossfader') {
             return (value / 127) * 2 - 1;
@@ -207,12 +226,20 @@ class MidiMapper {
         // Handle Deck A
         if (control === 'playA') this.app.togglePlay('A');
         if (control === 'cueA') this.app.setCuePoint('A');
+        if (control === 'syncA') this.app.syncDeck('A');
         if (control === 'headphoneCueA') this.app.toggleCue('A');
-        
+
         // Handle Deck B
         if (control === 'playB') this.app.togglePlay('B');
         if (control === 'cueB') this.app.setCuePoint('B');
+        if (control === 'syncB') this.app.syncDeck('B');
         if (control === 'headphoneCueB') this.app.toggleCue('B');
+
+        // Shift layer (the controller sends shifted buttons on channels 5/6)
+        if (control === 'stutterA') this.app.playStutter('A');
+        if (control === 'stutterB') this.app.playStutter('B');
+        if (control === 'returnStartA') this.app.returnToStart('A');
+        if (control === 'returnStartB') this.app.returnToStart('B');
 
         // Pads: the hardware mode selector changes which note range the pads
         // send, so the mode is implied by the mapping name
@@ -241,6 +268,7 @@ class DJTrainerApp {
         
         this.recording = false;
         this.coachInterval = null;
+        this.jogNudgeTimeout = { A: null, B: null };
         
         this.initDecks();
         this.bindEvents();
@@ -286,6 +314,12 @@ class DJTrainerApp {
         this.eqA = new Tone.EQ3(0, 0, 0);
         this.eqB = new Tone.EQ3(0, 0, 0);
 
+        // DJ-style filters: lowpass sweeps below center, highpass above
+        this.filterLP_A = new Tone.Filter(20000, 'lowpass');
+        this.filterHP_A = new Tone.Filter(20, 'highpass');
+        this.filterLP_B = new Tone.Filter(20000, 'lowpass');
+        this.filterHP_B = new Tone.Filter(20, 'highpass');
+
         // Initialize Channels/Volumes
         this.volumeNodeA = new Tone.Volume(0); // in decibels
         this.volumeNodeB = new Tone.Volume(0);
@@ -299,16 +333,22 @@ class DJTrainerApp {
 
         // Audio Routing: Main Output
         this.playerA.connect(this.eqA);
-        this.eqA.connect(this.volumeNodeA);
+        this.eqA.connect(this.filterLP_A);
+        this.filterLP_A.connect(this.filterHP_A);
+        this.filterHP_A.connect(this.volumeNodeA);
         this.volumeNodeA.connect(this.meterA);
         this.volumeNodeA.connect(this.crossfadeNode.a);
 
         this.playerB.connect(this.eqB);
-        this.eqB.connect(this.volumeNodeB);
+        this.eqB.connect(this.filterLP_B);
+        this.filterLP_B.connect(this.filterHP_B);
+        this.filterHP_B.connect(this.volumeNodeB);
         this.volumeNodeB.connect(this.meterB);
         this.volumeNodeB.connect(this.crossfadeNode.b);
 
-        this.crossfadeNode.toDestination();
+        this.masterGainNode = new Tone.Volume(Tone.gainToDb(0.8));
+        this.crossfadeNode.connect(this.masterGainNode);
+        this.masterGainNode.toDestination();
 
         // Audio Routing: Headphone Cue
         this.cueVolumeA = new Tone.Volume(-Infinity);
@@ -318,8 +358,10 @@ class DJTrainerApp {
         this.eqB.connect(this.cueVolumeB);
 
         this.cueDestination = Tone.getContext().createMediaStreamDestination();
-        this.cueVolumeA.connect(this.cueDestination);
-        this.cueVolumeB.connect(this.cueDestination);
+        this.headphoneGainNode = new Tone.Volume(Tone.gainToDb(0.8));
+        this.cueVolumeA.connect(this.headphoneGainNode);
+        this.cueVolumeB.connect(this.headphoneGainNode);
+        this.headphoneGainNode.connect(this.cueDestination);
 
         // Attach to hidden audio element for SinkId routing
         const cueAudioEl = document.getElementById('cueAudioElement');
@@ -424,6 +466,23 @@ class DJTrainerApp {
             const val = parseFloat(e.target.value);
             this.volumeNodeB.volume.value = Tone.gainToDb(val);
         });
+
+        document.getElementById('filterA').addEventListener('input', (e) => {
+            this.setFilter('A', parseFloat(e.target.value));
+        });
+        document.getElementById('filterB').addEventListener('input', (e) => {
+            this.setFilter('B', parseFloat(e.target.value));
+        });
+
+        document.getElementById('masterGain').addEventListener('input', (e) => {
+            this.masterGainNode.volume.value = Tone.gainToDb(parseFloat(e.target.value));
+        });
+        document.getElementById('headphoneGain').addEventListener('input', (e) => {
+            this.headphoneGainNode.volume.value = Tone.gainToDb(parseFloat(e.target.value));
+        });
+
+        document.getElementById('syncA').addEventListener('click', () => this.syncDeck('A'));
+        document.getElementById('syncB').addEventListener('click', () => this.syncDeck('B'));
 
         document.getElementById('crossfader').addEventListener('input', (e) => {
             const val = parseFloat(e.target.value); // -1 to 1
@@ -689,6 +748,108 @@ class DJTrainerApp {
         } else if (mode === 'SAMPLER') {
             console.log(`Triggered Sampler ${padNum} on Deck ${deckId}`);
         }
+    }
+
+    setFilter(deckId, norm) {
+        const lp = deckId === 'A' ? this.filterLP_A : this.filterLP_B;
+        const hp = deckId === 'A' ? this.filterHP_A : this.filterHP_B;
+
+        if (Math.abs(norm - 0.5) < 0.04) {
+            // Center detent: filter fully open
+            lp.frequency.value = 20000;
+            hp.frequency.value = 20;
+        } else if (norm < 0.5) {
+            // Sweep lowpass from 20kHz down to ~100Hz
+            lp.frequency.value = 100 * Math.pow(200, norm / 0.5);
+            hp.frequency.value = 20;
+        } else {
+            // Sweep highpass from 20Hz up to ~8kHz
+            lp.frequency.value = 20000;
+            hp.frequency.value = 20 * Math.pow(400, (norm - 0.5) / 0.5);
+        }
+    }
+
+    syncDeck(deckId) {
+        const track = deckId === 'A' ? this.deckA : this.deckB;
+        const otherTrack = deckId === 'A' ? this.deckB : this.deckA;
+        const player = deckId === 'A' ? this.playerA : this.playerB;
+        const otherPlayer = deckId === 'A' ? this.playerB : this.playerA;
+
+        if (!track || !otherTrack || !track.bpm || !otherTrack.bpm) {
+            console.log(`Sync ${deckId}: need tracks with BPM on both decks`);
+            return;
+        }
+
+        const targetBpm = otherTrack.bpm * otherPlayer.playbackRate;
+        // Clamp to the ±8% pitch fader range
+        const rate = Math.min(1.08, Math.max(0.92, targetBpm / track.bpm));
+        player.playbackRate = rate;
+
+        const pitchSlider = document.getElementById(`pitch${deckId}`);
+        if (pitchSlider) pitchSlider.value = ((rate - 1) * 100).toFixed(2);
+        this.updateTempoDisplay(deckId);
+        console.log(`Synced deck ${deckId} to ${targetBpm.toFixed(1)} BPM (rate ${rate.toFixed(4)})`);
+    }
+
+    handleJog(deckId, rawValue) {
+        const player = deckId === 'A' ? this.playerA : this.playerB;
+        if (!player.loaded) return;
+
+        // Relative encoder: 1..63 = forward ticks, 65..127 = backward
+        const delta = rawValue < 64 ? rawValue : rawValue - 128;
+
+        if (player.state === 'started') {
+            // Temporary pitch bend (nudge), restored after the wheel stops
+            const pitchSlider = document.getElementById(`pitch${deckId}`);
+            const baseRate = 1 + parseFloat(pitchSlider.value) / 100;
+            player.playbackRate = Math.min(1.5, Math.max(0.5, baseRate + delta * 0.005));
+
+            clearTimeout(this.jogNudgeTimeout[deckId]);
+            this.jogNudgeTimeout[deckId] = setTimeout(() => {
+                player.playbackRate = baseRate;
+                this.updateTempoDisplay(deckId);
+            }, 150);
+        } else {
+            // Paused: scrub through the track
+            const duration = player.buffer ? player.buffer.duration : 0;
+            const pos = deckId === 'A' ? this.positionA : this.positionB;
+            const newPos = Math.min(duration, Math.max(0, pos + delta * 0.1));
+            if (deckId === 'A') this.positionA = newPos;
+            else this.positionB = newPos;
+        }
+    }
+
+    playStutter(deckId) {
+        const player = deckId === 'A' ? this.playerA : this.playerB;
+        if (!player.loaded) return;
+
+        const cue = this.cuePoints[`deck${deckId}`].main;
+        if (player.state === 'started') player.stop();
+
+        if (deckId === 'A') {
+            this.positionA = cue;
+            this.startTimeA = Tone.now() - cue;
+        } else {
+            this.positionB = cue;
+            this.startTimeB = Tone.now() - cue;
+        }
+        player.start(0, cue);
+
+        const playBtn = document.getElementById(`play${deckId}`);
+        playBtn.classList.add('active');
+        playBtn.textContent = '⏸ PAUSE';
+    }
+
+    returnToStart(deckId) {
+        const player = deckId === 'A' ? this.playerA : this.playerB;
+        if (player.state === 'started') player.stop();
+
+        if (deckId === 'A') this.positionA = 0;
+        else this.positionB = 0;
+
+        const playBtn = document.getElementById(`play${deckId}`);
+        playBtn.classList.remove('active');
+        playBtn.textContent = '▶ PLAY';
     }
 
     togglePlay(deckId) {

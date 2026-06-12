@@ -1,5 +1,7 @@
-const { ipcRenderer } = require('electron');
-const Tone = require('tone');
+const { ipcRenderer, webUtils } = require('electron');
+// tone is ESM-only (even its UMD build inherits "type": "module"), so we vendor
+// the UMD bundle as .cjs to keep it require()-able
+const Tone = require('./vendor/Tone.cjs');
 const WaveSurfer = require('wavesurfer.js');
 const fs = require('fs');
 const path = require('path');
@@ -15,43 +17,63 @@ class MidiMapper {
     }
 
     loadMappings() {
+        // Hercules DJControl MIX hardware layout (per Mixxx mapping):
+        // Deck A = MIDI ch 2, Deck B = ch 3, mixer/crossfader = ch 1,
+        // pads = ch 7 (deck A) / ch 8 (deck B); pad mode is selected on the
+        // hardware and encoded in the note range (hotcue 0-3, sampler 16-19,
+        // FX 32-35, loop 48-51).
         const defaultMappings = {
+            "version": 2,
             "cc_mappings": {
-                "chA_volume": { "cc": 9, "channel": 1 },
-                "chB_volume": { "cc": 10, "channel": 1 },
-                "crossfader": { "cc": 11, "channel": 1 },
-                "eqA_high": { "cc": 14, "channel": 1 },
-                "eqA_mid": { "cc": 15, "channel": 1 },
-                "eqA_low": { "cc": 16, "channel": 1 },
-                "eqB_high": { "cc": 17, "channel": 1 },
-                "eqB_mid": { "cc": 18, "channel": 1 },
-                "eqB_low": { "cc": 19, "channel": 1 }
+                "volumeA": { "cc": 0, "channel": 2 },
+                "volumeB": { "cc": 0, "channel": 3 },
+                "crossfader": { "cc": 0, "channel": 1 },
+                "eqA_low": { "cc": 2, "channel": 2 },
+                "eqB_low": { "cc": 2, "channel": 3 },
+                "pitchA": { "cc": 8, "channel": 2 },
+                "pitchB": { "cc": 8, "channel": 3 }
             },
             "note_mappings": {
-                "playA": { "note": 1, "channel": 1 },
-                "cueA": { "note": 2, "channel": 1 },
-                "playB": { "note": 3, "channel": 1 },
-                "cueB": { "note": 4, "channel": 1 },
-                "headphoneCueA": { "note": 5, "channel": 1 },
-                "headphoneCueB": { "note": 6, "channel": 1 },
-                
-                "modeA_HOTCUE": { "note": 10, "channel": 1 },
-                "modeA_FX": { "note": 11, "channel": 1 },
-                "modeA_SAMPLER": { "note": 12, "channel": 1 },
-                "modeA_LOOP": { "note": 13, "channel": 1 },
-                "padA1": { "note": 14, "channel": 1 },
-                "padA2": { "note": 15, "channel": 1 },
-                "padA3": { "note": 16, "channel": 1 },
-                "padA4": { "note": 17, "channel": 1 },
-                
-                "modeB_HOTCUE": { "note": 20, "channel": 1 },
-                "modeB_FX": { "note": 21, "channel": 1 },
-                "modeB_SAMPLER": { "note": 22, "channel": 1 },
-                "modeB_LOOP": { "note": 23, "channel": 1 },
-                "padB1": { "note": 24, "channel": 1 },
-                "padB2": { "note": 25, "channel": 1 },
-                "padB3": { "note": 26, "channel": 1 },
-                "padB4": { "note": 27, "channel": 1 }
+                "playA": { "note": 7, "channel": 2 },
+                "cueA": { "note": 6, "channel": 2 },
+                "headphoneCueA": { "note": 12, "channel": 2 },
+                "playB": { "note": 7, "channel": 3 },
+                "cueB": { "note": 6, "channel": 3 },
+                "headphoneCueB": { "note": 12, "channel": 3 },
+
+                "padA1": { "note": 0, "channel": 7 },
+                "padA2": { "note": 1, "channel": 7 },
+                "padA3": { "note": 2, "channel": 7 },
+                "padA4": { "note": 3, "channel": 7 },
+                "samplerA1": { "note": 16, "channel": 7 },
+                "samplerA2": { "note": 17, "channel": 7 },
+                "samplerA3": { "note": 18, "channel": 7 },
+                "samplerA4": { "note": 19, "channel": 7 },
+                "fxA1": { "note": 32, "channel": 7 },
+                "fxA2": { "note": 33, "channel": 7 },
+                "fxA3": { "note": 34, "channel": 7 },
+                "fxA4": { "note": 35, "channel": 7 },
+                "loopA1": { "note": 48, "channel": 7 },
+                "loopA2": { "note": 49, "channel": 7 },
+                "loopA3": { "note": 50, "channel": 7 },
+                "loopA4": { "note": 51, "channel": 7 },
+
+                "padB1": { "note": 0, "channel": 8 },
+                "padB2": { "note": 1, "channel": 8 },
+                "padB3": { "note": 2, "channel": 8 },
+                "padB4": { "note": 3, "channel": 8 },
+                "samplerB1": { "note": 16, "channel": 8 },
+                "samplerB2": { "note": 17, "channel": 8 },
+                "samplerB3": { "note": 18, "channel": 8 },
+                "samplerB4": { "note": 19, "channel": 8 },
+                "fxB1": { "note": 32, "channel": 8 },
+                "fxB2": { "note": 33, "channel": 8 },
+                "fxB3": { "note": 34, "channel": 8 },
+                "fxB4": { "note": 35, "channel": 8 },
+                "loopB1": { "note": 48, "channel": 8 },
+                "loopB2": { "note": 49, "channel": 8 },
+                "loopB3": { "note": 50, "channel": 8 },
+                "loopB4": { "note": 51, "channel": 8 }
             }
         };
 
@@ -59,20 +81,23 @@ class MidiMapper {
         if (stored) {
             try {
                 const parsed = JSON.parse(stored);
-                this.ccMappings = parsed.cc_mappings || defaultMappings.cc_mappings;
-                this.noteMappings = parsed.note_mappings || defaultMappings.note_mappings;
+                // Discard mappings saved before the layout was corrected
+                if (parsed.version === defaultMappings.version) {
+                    this.ccMappings = parsed.cc_mappings || defaultMappings.cc_mappings;
+                    this.noteMappings = parsed.note_mappings || defaultMappings.note_mappings;
+                    return;
+                }
             } catch (e) {
-                this.ccMappings = defaultMappings.cc_mappings;
-                this.noteMappings = defaultMappings.note_mappings;
+                // fall through to defaults
             }
-        } else {
-            this.ccMappings = defaultMappings.cc_mappings;
-            this.noteMappings = defaultMappings.note_mappings;
         }
+        this.ccMappings = defaultMappings.cc_mappings;
+        this.noteMappings = defaultMappings.note_mappings;
     }
 
     saveMappings() {
         localStorage.setItem('midi_mappings', JSON.stringify({
+            version: 2,
             cc_mappings: this.ccMappings,
             note_mappings: this.noteMappings
         }));
@@ -88,9 +113,11 @@ class MidiMapper {
         }
 
         try {
-            const midiAccess = await navigator.requestMIDIAccess();
+            const midiAccess = await navigator.requestMIDIAccess({ sysex: true });
+            console.log('MIDI access granted. Inputs:', midiAccess.inputs.size);
             this.setupMidiPorts(midiAccess);
             midiAccess.onstatechange = (e) => {
+                console.log('MIDI state change:', e.port.name, e.port.state);
                 this.setupMidiPorts(midiAccess);
             };
         } catch (error) {
@@ -170,6 +197,8 @@ class MidiMapper {
             return value / 127;
         } else if (control === 'crossfader') {
             return (value / 127) * 2 - 1;
+        } else if (control.includes('pitch')) {
+            return (value / 127) * 16 - 8;
         }
         return value;
     }
@@ -185,20 +214,14 @@ class MidiMapper {
         if (control === 'cueB') this.app.setCuePoint('B');
         if (control === 'headphoneCueB') this.app.toggleCue('B');
 
-        // Handle Pad Modes
-        if (control.startsWith('modeA_')) {
-            this.app.setPadMode('A', control.split('_')[1].toUpperCase());
-        }
-        if (control.startsWith('modeB_')) {
-            this.app.setPadMode('B', control.split('_')[1].toUpperCase());
-        }
-
-        // Handle Pads
-        if (control.startsWith('padA')) {
-            this.app.handlePad('A', parseInt(control.replace('padA', '')));
-        }
-        if (control.startsWith('padB')) {
-            this.app.handlePad('B', parseInt(control.replace('padB', '')));
+        // Pads: the hardware mode selector changes which note range the pads
+        // send, so the mode is implied by the mapping name
+        const padMatch = control.match(/^(pad|loop|fx|sampler)([AB])(\d)$/);
+        if (padMatch) {
+            const modeForKind = { pad: 'HOT CUE', loop: 'LOOP', fx: 'FX', sampler: 'SAMPLER' };
+            const deck = padMatch[2];
+            this.app.setPadMode(deck, modeForKind[padMatch[1]]);
+            this.app.handlePad(deck, parseInt(padMatch[3]));
         }
     }
 }
@@ -444,6 +467,12 @@ class DJTrainerApp {
         document.getElementById('startCoach').addEventListener('click', () => this.toggleCoachMode());
     }
 
+    getDroppedFilePath(file) {
+        // Real File objects lost .path in Electron 32; test mocks still provide it
+        if (file.path) return file.path;
+        return webUtils.getPathForFile(file);
+    }
+
     async handleFileDrop(event, deckId) {
         event.preventDefault();
         const files = Array.from(event.dataTransfer.files);
@@ -453,7 +482,7 @@ class DJTrainerApp {
                 alert('Invalid file format. Please drop a valid audio WAV/MP3 file.');
                 return;
             }
-            const trackData = await ipcRenderer.invoke('load-track', file.path);
+            const trackData = await ipcRenderer.invoke('load-track', this.getDroppedFilePath(file));
             this.loadTrackToDeck(trackData, deckId);
         }
     }
@@ -465,7 +494,7 @@ class DJTrainerApp {
         for (const file of files) {
             if (file.name.endsWith('.wav') || file.name.endsWith('.mp3') || file.name.endsWith('.m4a')) {
                 validFileFound = true;
-                const trackData = await ipcRenderer.invoke('load-track', file.path);
+                const trackData = await ipcRenderer.invoke('load-track', this.getDroppedFilePath(file));
                 if (trackData) {
                     this.addTrackToPlaylist(trackData);
                 }
@@ -532,8 +561,9 @@ class DJTrainerApp {
             this.positionB = 0;
         }
 
-        await player.load(trackData.path);
-        waveform.load(trackData.path);
+        const fileUrl = `file://${trackData.path}`;
+        await player.load(fileUrl);
+        waveform.load(fileUrl);
 
         titleElement.textContent = trackData.title;
         artistElement.textContent = `${trackData.artist} • ${trackData.key}`;
@@ -664,6 +694,11 @@ class DJTrainerApp {
     togglePlay(deckId) {
         const player = deckId === 'A' ? this.playerA : this.playerB;
         const playBtn = document.getElementById(`play${deckId}`);
+
+        if (!player.loaded) {
+            console.log(`Deck ${deckId}: no track loaded, ignoring play`);
+            return;
+        }
 
         if (player.state === 'started') {
             player.stop();

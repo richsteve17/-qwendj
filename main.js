@@ -111,8 +111,18 @@ function createWindow() {
         }
     });
 
+    // Grant MIDI, audio device, and microphone permissions automatically
+    mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+        const allowed = ['midi', 'midiSysex', 'media', 'mediaKeySystem'];
+        callback(allowed.includes(permission));
+    });
+    mainWindow.webContents.session.setPermissionCheckHandler((webContents, permission) => {
+        const allowed = ['midi', 'midiSysex', 'media', 'mediaKeySystem'];
+        return allowed.includes(permission);
+    });
+
     mainWindow.loadFile('index.html');
-    
+
     if (process.argv.includes('--dev')) {
         mainWindow.webContents.openDevTools();
     }

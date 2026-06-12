@@ -1,1 +1,4 @@
-node_modules
+recorded_mix.wav
+test-results.json
+tests/fixtures/
+node_modules/

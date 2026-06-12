@@ -162,7 +162,7 @@ addTest('F1.1: Audio Load - Dropping a valid WAV loads the track successfully', 
 });
 
 addTest('F1.2: Real Decoding - Dropping a file invokes AudioContext.decodeAudioData()', async () => {
-    const Tone = require('tone');
+    const Tone = require('../vendor/Tone.cjs');
     const rawCtx = Tone.getContext().rawContext;
     let decoded = false;
     const originalDecode = rawCtx.decodeAudioData;
@@ -232,8 +232,8 @@ addTest('F2.3: MIDI Status Badge Online - Badge transitions to "MIDI Online" whe
 
 addTest('F2.4: Default Hercules Mapping - Moving controls updates Deck values', async () => {
     const input = mockMidiInputs.get('ctrl1');
-    // Volume A fader is CC 9. Status 0xB0 (CC ch 1), value 95.
-    input.onmidimessage({ data: [0xB0, 9, 95] });
+    // Volume A fader on the DJControl MIX is CC 0 on channel 2 (status 0xB1), value 95.
+    input.onmidimessage({ data: [0xB1, 0, 95] });
     await sleep(100);
     const volVal = parseFloat(document.getElementById('volumeA').value);
     if (Math.abs(volVal - 95/127) > 0.05) {
@@ -421,9 +421,9 @@ addTest('F2.B1: Dual MIDI Controllers - Handles multiple MIDI controllers simult
     const input1 = mockMidiInputs.get('ctrl1');
     const input2 = mockMidiInputs.get('ctrl2');
     
-    // Ctrl 1 adjusts Vol A CC 9. Ctrl 2 adjusts Vol B CC 10.
-    input1.onmidimessage({ data: [0xB0, 9, 30] });
-    input2.onmidimessage({ data: [0xB0, 10, 80] });
+    // Ctrl 1 adjusts Vol A (CC 0 ch 2). Ctrl 2 adjusts Vol B (CC 0 ch 3).
+    input1.onmidimessage({ data: [0xB1, 0, 30] });
+    input2.onmidimessage({ data: [0xB2, 0, 80] });
     await sleep(100);
     
     const volA = parseFloat(document.getElementById('volumeA').value);
@@ -437,7 +437,7 @@ addTest('F2.B1: Dual MIDI Controllers - Handles multiple MIDI controllers simult
 addTest('F2.B2: Out of Bound MIDI CC - Out of bound CC values (outside 0-127) are ignored', async () => {
     const input = mockMidiInputs.get('ctrl1');
     const preVol = document.getElementById('volumeA').value;
-    input.onmidimessage({ data: [0xB0, 9, 200] }); // 200 is out of bounds
+    input.onmidimessage({ data: [0xB1, 0, 200] }); // 200 is out of bounds
     await sleep(50);
     const postVol = document.getElementById('volumeA').value;
     if (preVol !== postVol) {
@@ -461,9 +461,9 @@ addTest('F2.B4: Custom Mapping Collision - Highlight warning when mapping same C
     const modal = document.getElementById('midiModal');
     const ccInputs = modal.querySelectorAll('.cc-input');
     
-    // Put same CC on first two CC inputs
+    // Put same CC on two controls sharing a channel (volumeA and eqA_low, both ch 2)
     ccInputs[0].value = 14;
-    ccInputs[1].value = 14;
+    ccInputs[3].value = 14;
     ccInputs[0].dispatchEvent(new Event('input'));
     await sleep(50);
     
